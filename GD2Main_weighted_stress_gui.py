@@ -13,14 +13,13 @@ from networkx.drawing.nx_agraph import write_dot
 from networkx.drawing.nx_agraph import read_dot as nx_read_dot
 
 #Metrics
-import ksymmetry_torch as ksymmetry
+import ksymmetry
 import crossings
-import stress_normalized_torch as stress
-import neighbors_preservation_torch as neighbors_preservation
-import uniformity_edge_length_torch as uniformity_edge_length
+import stress
+import neighbors_preservation
+import uniformity_edge_length
 import areafunctions
 
-import torch
 
 def scale_graph(G, alpha):
 
@@ -40,20 +39,21 @@ def scale_graph(G, alpha):
 
     return H
 
-#def writeSPXPositiontoNetworkXGraph(G, X):
-#    '''
-#    Convert matrix X to NetworkX graph structure
-#    '''
-#    positions = dict()
-#    sorted_v = sorted(nx.nodes(G))
-#    for i in range(0, len(sorted_v)):
-#        v = sorted_v[i]
-#        x = X[i,:][0]
-#        y = X[i,:][1]
-#        v_pos = str(x)+","+str(y)
-#        positions[v] = v_pos
-#    nx.set_node_attributes(G, positions, 'pos')
-#    return G
+
+def writeSPXPositiontoNetworkXGraph(G, X):
+    '''
+    Convert matrix X to NetworkX graph structure
+    '''
+    positions = dict()
+    sorted_v = sorted(nx.nodes(G))
+    for i in range(0, len(sorted_v)):
+        v = sorted_v[i]
+        x = X[i,:][0]
+        y = X[i,:][1]
+        v_pos = str(x)+","+str(y)
+        positions[v] = v_pos
+    nx.set_node_attributes(G, positions, 'pos')
+    return G
 
 
 def netoworkxPositionsToMatrix(G):
@@ -62,17 +62,20 @@ def netoworkxPositionsToMatrix(G):
     '''
 
     n = nx.number_of_nodes(G)
+    X_curr = np.random.rand(n,2)*100 - 50
     vertices_positions = nx.get_node_attributes(G, "pos")
     nodes_list_sorted = sorted(nx.nodes(G))
-    X = []
 
     for i in range(0, len(nodes_list_sorted)):
         curr_n_id = nodes_list_sorted[i]
         x = float(vertices_positions[curr_n_id].split(",")[0])
         y = float(vertices_positions[curr_n_id].split(",")[1])
-        X.append([x, y])
+        tmp = np.zeros((2))
+        tmp[0] = x
+        tmp[1] = y
+        X_curr[i] = tmp
 
-    return torch.tensor(X, requires_grad=True)
+    return X_curr
 
 
 def computeGraphDistances(G):
@@ -84,7 +87,7 @@ def computeGraphDistances(G):
     distances = nx.floyd_warshall(G_undirected)
     return distances
 
-def printMetrics(G, X):
+def printMetrics(G):
     '''
         Set inital values before optimization
     '''
@@ -100,7 +103,7 @@ def printMetrics(G, X):
     # To speed up ST precompute all pairs shortest paths
     initial_st = 1
     if compute_st:
-        initial_st = stress.stress(G, X, all_sp=all_pairs_sp)
+        initial_st = stress.stress(G, all_sp=all_pairs_sp)
         print("ST:", initial_st, end=" - ")
         if all_pairs_sp is None:
             all_pairs_sp = nx.shortest_path(G)
@@ -158,49 +161,45 @@ def metrics_evaluator(X, print_val=False):
     n = nx.number_of_nodes(G)
 
     #Reshape the 1D array to a n*2 matrix
-    #X = X.reshape((n,2))
-    #return_val = 0.0
-    return_val = torch.zeros(1, requires_grad=True)
+    X = X.reshape((n,2))
+    return_val = 0.0
 
-    #G = writeSPXPositiontoNetworkXGraph(G, X)
+    G = writeSPXPositiontoNetworkXGraph(G, X)
 
     ue = 0
     ue_count = 0
     if compute_ue:
-        ue = uniformity_edge_length.uniformity_edge_length(G, X)
+        ue = uniformity_edge_length.uniformity_edge_length(G)
         ue_count = ue
         # if log%100==0:
             # print("UE:", ue, end=" - ")
-        #ue *= abs(compute_ue)
+        ue *= abs(compute_ue)
 
     st = 0
     st_count=0
     if compute_st:
-        #st = stress.stress(G, X, all_sp=all_pairs_sp)
-        st = stress.stress(G, X)
+        st = stress.stress(G, all_sp=all_pairs_sp)
         st_count = st
         # if log%100==0:
             # print("ST:", st, end=" - ")
-        st = st*abs(compute_st)/initial_st
+        st *= abs(compute_st)/initial_st
 
     sym = 0
     sym_count = 0
     if compute_sym:
         G = scale_graph(G, 1000)
         sym = ksymmetry.get_symmetric_score(G)
-        print("sym:", sym)
         G = scale_graph(G, 1/1000)
         sym_count = sym
         # if log%100==0:
             # print("Sym:", abs(sym), end=" - ")
         sym = 1-sym
-        #sym *= abs(compute_sym)
+        sym *= abs(compute_sym)
 
     np = 0
     np_count = 0
     if compute_np:
-        np = neighbors_preservation.compute_neig_preservation(G, X, all_sp=all_pairs_sp)
-        #np = neighbors_preservation.compute_neig_preservation(G, all_sp=all_pairs_sp)
+        np = neighbors_preservation.compute_neig_preservation(G, all_sp=all_pairs_sp)
         np_count = np
         np = 1-np
         np *= abs(compute_np)
@@ -230,40 +229,43 @@ def metrics_evaluator(X, print_val=False):
         asp = abs(asp-1)
         asp *= abs(compute_asp)/initial_asp
 
-    #return_val = ue+st+sym+np+cr+ar+asp
-    return_val = return_val+ue+st+sym+np
+    return_val = ue+st+sym+np+cr+ar+asp
 
     if print_val:
         print("score: ", return_val)
 
     if mode=="GUI":
       if draw_counter%100==0:
-        min_x, min_y, max_x, max_y = 0, 0, 0, 0
-        for j in range(len(X)):
-          x = X[j][0].item()
-          y = X[j][1].item()
-          min_x = min(min_x,x)
-          max_x = max(max_x,x)
-          min_y = min(min_y, y)
-          max_y = max(max_y, y)
+          min_x, min_y, max_x, max_y = 0, 0, 0, 0
+          for currVStr in nx.nodes(G):
+              currV = G.nodes[currVStr]
+              x = float(currV['pos'].split(",")[0])
+              y = float(currV['pos'].split(",")[1])
+              min_x = min(min_x,x)
+              max_x = max(max_x,x)
+              min_y = min(min_y, y)
+              max_y = max(max_y, y)
+              currV['pos'] = str(x)+","+str(y)
 
-        cnvs.delete("all")
-        scl = (cnvs_size-cnvs_padding)/(max(max_y-min_y, max_x-min_x))
-        tx = cnvs_padding/2
-        ty = cnvs_padding/2
-        for edge in nx.edges(G):
-          (s,t) = edge
-          x_source = X[s][0].item()
-          x_target = X[t][0].item()
-          y_source = X[s][1].item()
-          y_target = X[t][1].item()
-          cnvs.create_line((x_source-min_x)*scl+tx, (y_source-min_y)*scl+ty, (x_target-min_x)*scl+tx, (y_target-min_y)*scl+ty)
-          print((x_source-min_x)*scl, (x_target-min_x)*scl, (y_source-min_y)*scl, (y_target-min_y)*scl)
-          cnvs.update()
-    draw_counter += 1
+          cnvs.delete("all")
+          scl = (cnvs_size-cnvs_padding)/(max(max_y-min_y, max_x-min_x))
+          tx = cnvs_padding/2
+          ty = cnvs_padding/2
+          pos_dict = nx.get_node_attributes(G, 'pos')
+          for edge in nx.edges(G):
+              (s,t) = edge
+              x_source = float(pos_dict[s].split(",")[0])
+              x_target = float(pos_dict[t].split(",")[0])
+              y_source = float(pos_dict[s].split(",")[1])
+              y_target = float(pos_dict[t].split(",")[1])
+              cnvs.create_line((x_source-min_x)*scl+tx, (y_source-min_y)*scl+ty, (x_target-min_x)*scl+tx, (y_target-min_y)*scl+ty)
+              print((x_source-min_x)*scl, (x_target-min_x)*scl, (y_source-min_y)*scl, (y_target-min_y)*scl)
+              cnvs.update()
+      draw_counter += 1
 
     return return_val
 
+import torch
 def torch_to_numpy(X_torch):
   n = len(X_torch)
   X = np.random.rand(n,2)
@@ -278,83 +280,33 @@ def numpy_to_torch(X):
      X_torch[i][0], X_torch[i][1] = X[i][0], X[i][1]
   return X_torch
 
-def stress_simple(x, d):
-    s = torch.zeros(1)
-    for i in range(len(x)):
-        for j in range(i):
-            de = torch.sqrt(
-                    torch.sum(
-                        (x[i,0:2]-x[j,0:2])**2
-                ))
-            s += (de - d[i][j])**2
-    return s
-
-
-#def minimize_with_torch(func, X, D, lr=.01, prec=.001, max_iter=1000):
 def minimize_with_torch(func, X, lr=.01, prec=.001, max_iter=1000):
-  global draw_counter, mode, cnvs_size, cnvs_padding, scl, tx, ty
   step = 1
   i = 0
   while i<max_iter:
-    #s = func(X, D)
-    s = func(X)
-    print(s)
+    X_numpy = torch_to_numpy(X)
+    s = func(X_numpy)
+    #print(s)
     s.backward()
     with torch.no_grad():
       X = X - lr*X.grad
     X.requires_grad = True
     i += 1
-    if mode=="GUI":
-      if draw_counter%100==0:
-        min_x, min_y, max_x, max_y = 0, 0, 0, 0
-        for j in range(len(X)):
-          x = X[j][0].item()
-          y = X[j][1].item()
-          min_x = min(min_x,x)
-          max_x = max(max_x,x)
-          min_y = min(min_y, y)
-          max_y = max(max_y, y)
-
-        cnvs.delete("all")
-        scl = (cnvs_size-cnvs_padding)/(max(max_y-min_y, max_x-min_x))
-        tx = cnvs_padding/2
-        ty = cnvs_padding/2
-        for edge in nx.edges(G):
-          (s,t) = edge
-          x_source = X[s][0].item()
-          x_target = X[t][0].item()
-          y_source = X[s][1].item()
-          y_target = X[t][1].item()
-          cnvs.create_line((x_source-min_x)*scl+tx, (y_source-min_y)*scl+ty, (x_target-min_x)*scl+tx, (y_target-min_y)*scl+ty)
-          print((x_source-min_x)*scl, (x_target-min_x)*scl, (y_source-min_y)*scl, (y_target-min_y)*scl)
-          cnvs.update()
-    draw_counter += 1
-  print('i:', i)
-  print('X:', X)
-
-
+  #print('i:', i)
+  #print('X:', X)
 def optimize(G):
     X = netoworkxPositionsToMatrix(G)
     n = nx.number_of_nodes(G)
     # Use gradient descent to optimize the metrics_evaluator function
     # keep the X as a flattened 1D array and reshape it inside the
     # metrics_evaluator function as a 2D array/matrix
-    #X = X.flatten()
-    #res = minimize(metrics_evaluator, X, method='L-BFGS-B')
-    #X = res.x.reshape((n,2))
+    X = X.flatten()
+    res = minimize(metrics_evaluator, X, method='L-BFGS-B')
+    X = res.x.reshape((n,2))
     #******************TORCH*************
     #X_torch = numpy_to_torch(X)
     #minimize_with_torch(metrics_evaluator, X_torch)
     #X = torch_to_numpy(X_torch)
-    #X = minimize_with_torch(metrics_evaluator, X)
-    r = 2
-    h = 5
-    #X = torch.rand(r**(h+1)-1, 2, requires_grad = True)
-    #G = nx.balanced_tree(r, h)
-    #X = torch.rand(n, 2, requires_grad = True)
-    D = dict(nx.all_pairs_shortest_path_length(G))
-    #X = minimize_with_torch(stress_simple, X, D)
-    X = minimize_with_torch(metrics_evaluator, X)
     #************************************
     return X
 
@@ -440,15 +392,15 @@ def run_GD():
   global G, OUTPUT_FOLDER, graph_name
   curr_G = G.copy()
   print("Initial metrics")
-  #printMetrics(curr_G)
+  printMetrics(curr_G)
   final_position_matrix = optimize(G)
-  #curr_G = writeSPXPositiontoNetworkXGraph(curr_G, final_position_matrix)
-  #write_dot(curr_G, OUTPUT_FOLDER + graph_name + '_final.dot')
-  #curr_G = G.copy()
-  #write_dot(curr_G, OUTPUT_FOLDER + graph_name + '_final.dot')
-  #print("Final Metrics")
-  #printMetrics(curr_G)
-  #metrics_evaluator(final_position_matrix, print_val=True)
+  curr_G = writeSPXPositiontoNetworkXGraph(curr_G, final_position_matrix)
+  write_dot(curr_G, OUTPUT_FOLDER + graph_name + '_final.dot')
+  curr_G = G.copy()
+  write_dot(curr_G, OUTPUT_FOLDER + graph_name + '_final.dot')
+  print("Final Metrics")
+  printMetrics(curr_G)
+  metrics_evaluator(final_position_matrix, print_val=True)
 
 if mode=="console":
   input_file_name = sys.argv[4]
