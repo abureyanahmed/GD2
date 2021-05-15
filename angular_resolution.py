@@ -4,6 +4,7 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 import math
+import random
 
 #G = nx.cycle_graph(4)
 G = nx.cycle_graph(10)
@@ -21,13 +22,13 @@ plt.show()
 pos.requires_grad = True
 optimizer = optim.Adam([pos], lr=0.0005)
 
-for iter in range(200):
+for iter in range(500):
 #for iter in range(10):
  #loss = torch.tensor([0.0 for j in range(G.number_of_nodes())])
  loss = torch.tensor(0.0)
  loss.requires_grad = True
  for i in range(G.number_of_nodes()):
- #for i in [0,G.number_of_nodes()-1]:
+ #for i in [random.randint(0, G.number_of_nodes()-1)]:
   ngbrs = list(G.neighbors(i))
   n = len(ngbrs)
   if n<=1:
